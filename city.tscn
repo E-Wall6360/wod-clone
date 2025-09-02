@@ -1,0 +1,13 @@
+[gd_scene load_steps=2 format=3 uid="uid://0pxbw5e43ry7"]
+
+[ext_resource type="Script" uid="uid://0a5kywbpqflk" path="res://city.gd" id="1_hpa3k"]
+
+[node name="Node2D" type="Node2D"]
+script = ExtResource("1_hpa3k")
+
+[node name="ColorRect" type="ColorRect" parent="."]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+color = Color(1, 1, 0, 1)
