@@ -83,16 +83,21 @@ func calculate_frontline():
             var player_influence = 1.0 / max(1.0, test_point.distance_to(player_city.global_position))
             var enemy_influence = 1.0 / max(1.0, test_point.distance_to(enemy_city.global_position))
             
-            # Add unit influence
+            # Add unit influence with distance falloff
             for unit in player_units:
                 if unit.has_method("get_cluster_size"):
                     var dist = max(1.0, test_point.distance_to(unit.global_position))
-                    player_influence += 0.5 / dist
+                    # Strong influence only within 80 pixels, then rapid falloff
+                    if dist < 80:
+                        var cluster_bonus = unit.get_cluster_size() * 0.5
+                        player_influence += (3.0 + cluster_bonus) / (dist * dist * 0.01)
             
             for unit in enemy_units:
                 if unit.has_method("get_cluster_size"):
                     var dist = max(1.0, test_point.distance_to(unit.global_position))
-                    enemy_influence += 0.5 / dist
+                    if dist < 80:
+                        var cluster_bonus = unit.get_cluster_size() * 0.5
+                        enemy_influence += (3.0 + cluster_bonus) / (dist * dist * 0.01)
             
             # Check if balanced
             var total = player_influence + enemy_influence
@@ -153,6 +158,16 @@ func sort_points_for_curve(points: Array) -> Array:
 func get_frontline_points():
     return frontline_points
 
+func get_enemy_city_position(unit_team):
+    # Find the enemy city for this unit's team
+    for child in get_children():
+        if child.has_method("_spawn_unit"):
+            if unit_team == 0 and child.team == 1:  # Player unit targeting enemy city
+                return child.global_position
+            elif unit_team == 1 and child.team == 0:  # Enemy unit targeting player city
+                return child.global_position
+    return Vector2.ZERO
+
 func get_enemy_center(unit_team):
     if unit_team == 0:  # Player unit, target enemy center
         if enemy_units.size() > 0:
@@ -173,6 +188,10 @@ func _input(event):
     if event is InputEventKey and event.pressed:
         if event.keycode == KEY_R:
             restart_game()
+
+func toggle_pause():
+    get_tree().paused = !get_tree().paused
+    print("Game paused!" if get_tree().paused else "Game resumed!")
 
 func restart_game():
     # Remove ALL children
