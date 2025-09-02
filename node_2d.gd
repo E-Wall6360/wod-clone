@@ -9,17 +9,10 @@ func _ready():
     print("=== BEGIN COMBAT ===")
     spawn_cities()
 
-    # Update unit lists every second
-    var timer = Timer.new()
-    timer.wait_time = 1.0
-    timer.timeout.connect(update_unit_lists)
-    timer.autostart = true
-    add_child(timer)
-
 func spawn_cities():
     var viewport_size = get_viewport().get_visible_rect().size
-    var corner_radius = 100  # Smaller radius to keep cities on-screen
-    var margin = 50  # Keep cities away from exact edges
+    var corner_radius = 100
+    var margin = 50
     
     # Player city - bottom left corner
     var player_city = city_scene.instantiate()
@@ -41,6 +34,11 @@ func spawn_cities():
     enemy_city.global_position = enemy_pos
     add_child(enemy_city)
 
+func _process(_delta):
+    update_unit_lists()
+    calculate_frontline()
+    queue_redraw()
+
 func update_unit_lists():
     player_units.clear()
     enemy_units.clear()
@@ -51,20 +49,16 @@ func update_unit_lists():
                 player_units.append(child)
             elif child.team == 1:
                 enemy_units.append(child)
-    
-    calculate_frontline()
-    queue_redraw()
-    print("Player units: ", player_units.size(), " Enemy units: ", enemy_units.size())
 
 func calculate_frontline():
     frontline_points.clear()
     
-    # Find the two cities first
+    # Find cities
     var player_city = null
     var enemy_city = null
     
     for child in get_children():
-        if child.has_method("_spawn_unit"):  # This identifies cities
+        if child.has_method("_spawn_unit"):
             if child.team == 0:
                 player_city = child
             elif child.team == 1:
@@ -73,32 +67,88 @@ func calculate_frontline():
     if not player_city or not enemy_city:
         return
     
-    # Sample points across the map
     var viewport_size = get_viewport().get_visible_rect().size
-    var sample_points_x = 20
-    var sample_points_y = 15
     
-    for x in range(sample_points_x):
-        for y in range(sample_points_y):
-            var test_point = Vector2(
-                x * viewport_size.x / sample_points_x,
-                y * viewport_size.y / sample_points_y
-            )
+    # For each row, find the frontline point
+    for y in range(0, int(viewport_size.y), 15):
+        var leftmost_x = viewport_size.x
+        var rightmost_x = 0.0
+        var valid_points = []
+        
+        # Scan horizontally to find balanced influence points
+        for x in range(0, int(viewport_size.x), 10):
+            var test_point = Vector2(x, y)
             
-            var dist_to_player_city = test_point.distance_to(player_city.global_position)
-            var dist_to_enemy_city = test_point.distance_to(enemy_city.global_position)
+            # Base influence from cities
+            var player_influence = 1.0 / max(1.0, test_point.distance_to(player_city.global_position))
+            var enemy_influence = 1.0 / max(1.0, test_point.distance_to(enemy_city.global_position))
             
-            # If distances are roughly equal, this point is on the frontline
-            if abs(dist_to_player_city - dist_to_enemy_city) < 30:
-                frontline_points.append(test_point)
-    
-    print("Base-distance frontline points: ", frontline_points.size())
+            # Add unit influence
+            for unit in player_units:
+                if unit.has_method("get_cluster_size"):
+                    var dist = max(1.0, test_point.distance_to(unit.global_position))
+                    player_influence += 0.5 / dist
+            
+            for unit in enemy_units:
+                if unit.has_method("get_cluster_size"):
+                    var dist = max(1.0, test_point.distance_to(unit.global_position))
+                    enemy_influence += 0.5 / dist
+            
+            # Check if balanced
+            var total = player_influence + enemy_influence
+            if total > 0:
+                var balance = abs(player_influence - enemy_influence) / total
+                if balance < 0.15:
+                    valid_points.append(test_point)
+                    leftmost_x = min(leftmost_x, x)
+                    rightmost_x = max(rightmost_x, x)
+        
+        # Add midpoint of valid range for this row
+        if valid_points.size() > 0:
+            var midpoint_x = (leftmost_x + rightmost_x) / 2
+            frontline_points.append(Vector2(midpoint_x, y))
 
 func _draw():
-    # Draw frontline as a line
+    # Draw frontline as a connected line through the center of the influence balance
     if frontline_points.size() > 1:
-        for i in range(frontline_points.size() - 1):
-            draw_line(frontline_points[i], frontline_points[i + 1], Color.GRAY, 3.0)
+        var sorted_points = sort_points_for_curve(frontline_points)
+        
+        # Draw connected line segments
+        for i in range(sorted_points.size() - 1):
+            draw_line(sorted_points[i], sorted_points[i + 1], Color.WHITE, 2.0)
+
+func sort_points_for_curve(points: Array) -> Array:
+    if points.size() <= 1:
+        return points
+    
+    var sorted = []
+    var remaining = points.duplicate()
+    
+    # Start with leftmost point
+    var current = remaining[0]
+    for point in remaining:
+        if point.x < current.x:
+            current = point
+    
+    sorted.append(current)
+    remaining.erase(current)
+    
+    # Always connect to nearest remaining point
+    while remaining.size() > 0:
+        var nearest = remaining[0]
+        var nearest_dist = current.distance_to(nearest)
+        
+        for point in remaining:
+            var dist = current.distance_to(point)
+            if dist < nearest_dist:
+                nearest = point
+                nearest_dist = dist
+        
+        sorted.append(nearest)
+        remaining.erase(nearest)
+        current = nearest
+    
+    return sorted
 
 func get_frontline_points():
     return frontline_points
@@ -125,7 +175,7 @@ func _input(event):
             restart_game()
 
 func restart_game():
-    # Remove ALL children (including timer)
+    # Remove ALL children
     for child in get_children():
         child.queue_free()
     
@@ -136,13 +186,6 @@ func restart_game():
     queue_redraw()
     
     await get_tree().process_frame
-    
-    # Recreate the timer
-    var timer = Timer.new()
-    timer.wait_time = 1.0
-    timer.timeout.connect(update_unit_lists)
-    timer.autostart = true
-    add_child(timer)
     
     # Spawn new cities
     spawn_cities()
