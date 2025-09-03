@@ -8,11 +8,12 @@ var move_speed = 50.0
 var cluster_mates = []
 var enemy_contacts = []
 
+@onready var main_scene = get_parent()
+
 func _ready():
     target_position = global_position
     modulate = Color.BLUE if team == Team.PLAYER else Color.RED
     
-    # Connect Area2D signals
     area_entered.connect(_on_area_entered)
     area_exited.connect(_on_area_exited)
 
@@ -21,11 +22,9 @@ func _on_area_entered(area):
         return
         
     if area.team == team:
-        # Friendly unit - add to cluster
         if area not in cluster_mates:
             cluster_mates.append(area)
     else:
-        # Enemy unit - add to combat
         if area not in enemy_contacts:
             enemy_contacts.append(area)
 
@@ -36,59 +35,87 @@ func _on_area_exited(area):
         enemy_contacts.erase(area)
 
 func get_cluster_size():
-    return cluster_mates.size() + 1  # Include self
+    return cluster_mates.size() + 1
 
-func find_closest_frontline_point(frontline_points: Array) -> Vector2:
-    if frontline_points.size() == 0:
-        return Vector2.ZERO
+func get_nearby_units():
+    var nearby = []
+    for child in main_scene.get_children():
+        if child != self and child.has_method("get_cluster_size"):
+            var distance = global_position.distance_to(child.global_position)
+            if distance < 25:
+                nearby.append(child)
+    return nearby
+
+func get_separation_force() -> Vector2:
+    var separation = Vector2.ZERO
+    var nearby = get_nearby_units()
     
-    var closest_point = frontline_points[0]
-    var closest_distance = global_position.distance_to(closest_point)
+    for unit in nearby:
+        var distance = global_position.distance_to(unit.global_position)
+        if distance > 0:
+            var away = (global_position - unit.global_position).normalized()
+            separation += away * (25 - distance) / distance
     
-    for point in frontline_points:
-        var distance = global_position.distance_to(point)
-        if distance < closest_distance:
-            closest_distance = distance
-            closest_point = point
-    
-    return closest_point
+    return separation
 
 func _process(_delta):
-    # Handle combat if in contact with enemies
+    var viewport_size = get_viewport().get_visible_rect().size
+    var margin = 50
+    
+    # Update contacts based on distance
+    update_contacts()
+    
     if enemy_contacts.size() > 0:
-        handle_combat(_delta)
-        return
+        var enemy_city = main_scene.get_enemy_city_position(team)
+        var dist_to_edge = min(global_position.x, global_position.y, 
+                              viewport_size.x - global_position.x, 
+                              viewport_size.y - global_position.y)
+        var dist_to_city = global_position.distance_to(enemy_city) if enemy_city != Vector2.ZERO else INF
+        
+        if dist_to_edge < dist_to_city:
+            var movement_direction = (enemy_city - global_position).normalized()
+            var separation = get_separation_force()
+            var combined_force = movement_direction + separation * 2.0
+            var new_position = global_position + combined_force.normalized() * move_speed * _delta
+            new_position.x = clamp(new_position.x, margin, viewport_size.x - margin)
+            new_position.y = clamp(new_position.y, margin, viewport_size.y - margin)
+            global_position = new_position
+            return
+        else:
+            handle_combat(_delta)
+            return
     
-    # Move toward enemy city, but also be attracted to nearby enemies
-    var main_scene = get_parent()
-    var city_target = Vector2.ZERO
-    
-    if main_scene.has_method("get_enemy_city_position"):
-        city_target = main_scene.get_enemy_city_position(team)
-    
-    if city_target == Vector2.ZERO:
-        return
-    
-    # Find nearby enemies to be attracted to
     var nearest_enemy = find_nearest_enemy()
+    var enemy_city = main_scene.get_enemy_city_position(team)
     var movement_direction = Vector2.ZERO
     
     if nearest_enemy and global_position.distance_to(nearest_enemy.global_position) < 150:
-        # Blend city direction with enemy attraction
-        var city_direction = (city_target - global_position).normalized()
-        var enemy_direction = (nearest_enemy.global_position - global_position).normalized()
-        movement_direction = (city_direction * 0.6 + enemy_direction * 0.4).normalized()
-    else:
-        # Just head to city if no nearby enemies
-        movement_direction = (city_target - global_position).normalized()
+        movement_direction = (nearest_enemy.global_position - global_position).normalized()
+    elif enemy_city != Vector2.ZERO:
+        movement_direction = (enemy_city - global_position).normalized()
     
-    global_position += movement_direction * move_speed * _delta
+    var separation = get_separation_force()
+    var combined_force = movement_direction + separation
+    var new_position = global_position + combined_force.normalized() * move_speed * _delta
+    new_position.x = clamp(new_position.x, margin, viewport_size.x - margin)
+    new_position.y = clamp(new_position.y, margin, viewport_size.y - margin)
+    
+    global_position = new_position
+
+func update_contacts():
+    enemy_contacts.clear()
+    cluster_mates.clear()
+    
+    var nearby = get_nearby_units()
+    for unit in nearby:
+        if unit.team == team:
+            cluster_mates.append(unit)
+        else:
+            enemy_contacts.append(unit)
 
 func find_nearest_enemy():
-    var main_scene = get_parent()
     var enemy_units = []
     
-    # Get enemy units from main scene
     for child in main_scene.get_children():
         if "team" in child and child.team != team and child.has_method("get_cluster_size"):
             enemy_units.append(child)
@@ -108,25 +135,27 @@ func find_nearest_enemy():
     return nearest
 
 func handle_combat(_delta):
-    # Calculate net force from all enemy contacts
-    var net_force = Vector2.ZERO
+    var enemy_city = main_scene.get_enemy_city_position(team)
+    if enemy_city == Vector2.ZERO:
+        return
+    
+    var toward_target = (enemy_city - global_position).normalized()
     var my_cluster_size = get_cluster_size()
+    var total_enemy_size = 0
     
     for enemy in enemy_contacts:
-        var enemy_cluster_size = enemy.get_cluster_size()
-        var force_direction = (global_position - enemy.global_position).normalized()
-        
-        # Force = difference in cluster sizes (positive means I'm stronger)
-        var force_magnitude = my_cluster_size - enemy_cluster_size
-        
-        # If I'm stronger (positive force), push toward enemy
-        # If I'm weaker (negative force), get pushed back
-        if force_magnitude > 0:
-            # I'm stronger - push toward the enemy
-            net_force -= force_direction * force_magnitude
-        else:
-            # I'm weaker - get pushed back
-            net_force += force_direction * abs(force_magnitude)
+        total_enemy_size += enemy.get_cluster_size()
     
-    # Apply the force
-    global_position += net_force * move_speed * _delta * 0.1  # Scale down combat movement
+    var force_magnitude = my_cluster_size - total_enemy_size
+    var net_force = toward_target * force_magnitude
+    
+    var separation = get_separation_force()
+    var combined_force = net_force + separation
+    
+    var viewport_size = get_viewport().get_visible_rect().size
+    var margin = 50
+    var new_position = global_position + combined_force * move_speed * _delta * 0.2
+    new_position.x = clamp(new_position.x, margin, viewport_size.x - margin)
+    new_position.y = clamp(new_position.y, margin, viewport_size.y - margin)
+    
+    global_position = new_position
