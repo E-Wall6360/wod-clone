@@ -110,8 +110,21 @@ func unit_has_advanced_past_frontline(unit, original_frontline_point, advance_di
 
 func _draw():
     if frontline_points.size() > 1:
-        for i in range(frontline_points.size() - 1):
-            draw_line(frontline_points[i], frontline_points[i + 1], Color.WHITE, 2.0)
+        # Create smoothed points just for drawing
+        var smoothed_points = []
+        smoothed_points.append(frontline_points[0])  # Keep first point as-is
+        
+        for i in range(1, frontline_points.size() - 1):
+            var prev = frontline_points[i - 1]
+            var curr = frontline_points[i]
+            var next = frontline_points[i + 1]
+            smoothed_points.append((prev + curr + next) / 3.0)
+        
+        smoothed_points.append(frontline_points[-1])  # Keep last point as-is
+        
+        # Draw with the smoothed points
+        for i in range(smoothed_points.size() - 1):
+            draw_line(smoothed_points[i], smoothed_points[i + 1], Color.WHITE, 2.0)
 
 func get_frontline_points():
     return frontline_points
