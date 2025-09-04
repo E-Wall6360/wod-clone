@@ -6,7 +6,6 @@ enum Team { PLAYER, ENEMY }
 var target_position = Vector2.ZERO
 const NORMAL_SPEED = 25.0
 var move_speed = NORMAL_SPEED
-var encircled_speed = 25.0
 var cluster_mates = []
 var enemy_contacts = []
 
@@ -138,41 +137,35 @@ func _process(_delta):
     var viewport_size = get_viewport().get_visible_rect().size
     var margin = 50
     
+    # Get terrain speed multiplier for current position
+    var terrain_multiplier = main_scene.get_terrain_speed_multiplier(global_position)
+    var actual_speed = move_speed * terrain_multiplier
+    
     # Update contacts based on distance
     update_contacts()
     
     if enemy_contacts.size() > 0:
-        var enemy_city = main_scene.get_enemy_city_position(team)
-        var dist_to_edge = min(global_position.x, global_position.y, 
-                              viewport_size.x - global_position.x, 
-                              viewport_size.y - global_position.y)
-        var dist_to_city = global_position.distance_to(enemy_city) if enemy_city != Vector2.ZERO else INF
-        
-        if dist_to_edge < dist_to_city:
-            var movement_direction = (enemy_city - global_position).normalized()
-            var separation = get_separation_force()
-            var combined_force = movement_direction + separation * 2.0
-            var new_position = global_position + combined_force.normalized() * move_speed * _delta
-            new_position.x = clamp(new_position.x, margin, viewport_size.x - margin)
-            new_position.y = clamp(new_position.y, margin, viewport_size.y - margin)
-            global_position = new_position
-            return
-        else:
-            handle_combat(_delta)
-            return
+        handle_combat(_delta)
+        return
     
+    # Use terrain-aware pathfinding for movement
     var nearest_enemy = find_nearest_enemy()
     var enemy_city = main_scene.get_enemy_city_position(team)
-    var movement_direction = Vector2.ZERO
+    var target_pos = Vector2.ZERO
     
     if nearest_enemy and global_position.distance_to(nearest_enemy.global_position) < 150:
-        movement_direction = (nearest_enemy.global_position - global_position).normalized()
+        target_pos = nearest_enemy.global_position
     elif enemy_city != Vector2.ZERO:
-        movement_direction = (enemy_city - global_position).normalized()
+        target_pos = enemy_city
+    else:
+        return  # No target
     
+    # Get the smart movement direction
+    var movement_direction = get_best_movement_direction(target_pos)
     var separation = get_separation_force()
     var combined_force = movement_direction + separation
-    var new_position = global_position + combined_force.normalized() * move_speed * _delta
+    
+    var new_position = global_position + combined_force.normalized() * actual_speed * _delta
     new_position.x = clamp(new_position.x, margin, viewport_size.x - margin)
     new_position.y = clamp(new_position.y, margin, viewport_size.y - margin)
     
@@ -210,10 +203,53 @@ func find_nearest_enemy():
     
     return nearest
 
+func get_best_movement_direction(target_pos: Vector2) -> Vector2:
+    # If we're already on good terrain and close to target, just go direct
+    var current_terrain_speed = main_scene.get_terrain_speed_multiplier(global_position)
+    var distance_to_target = global_position.distance_to(target_pos)
+    
+    if current_terrain_speed >= 0.75 and distance_to_target < 100:
+        return (target_pos - global_position).normalized()
+    
+    # Sample 8 directions around the unit
+    var best_direction = Vector2.ZERO
+    var best_score = -999.0
+    var sample_distance = 50.0  # How far ahead to look
+    
+    for i in range(8):
+        var angle = i * PI / 4.0  # 0, 45, 90, 135, 180, 225, 270, 315 degrees
+        var test_direction = Vector2(cos(angle), sin(angle))
+        var test_position = global_position + test_direction * sample_distance
+        
+        # Get terrain speed at test position
+        var terrain_speed = main_scene.get_terrain_speed_multiplier(test_position)
+        
+        # Calculate progress toward target (dot product)
+        var direct_to_target = (target_pos - global_position).normalized()
+        var progress_factor = test_direction.dot(direct_to_target)
+        
+        # Score = terrain_quality * progress_toward_target
+        # Terrain weight is higher so units really avoid bad terrain
+        var score = terrain_speed * 2.0 + progress_factor * 1.0
+        
+        if score > best_score:
+            best_score = score
+            best_direction = test_direction
+    
+    # Fallback to direct path if no good options found
+    if best_direction == Vector2.ZERO:
+        return (target_pos - global_position).normalized()
+    
+    return best_direction
+
 func handle_combat(_delta):
     var enemy_city = main_scene.get_enemy_city_position(team)
     if enemy_city == Vector2.ZERO:
         return
+    
+    # Get terrain speed multiplier for current position
+    var terrain_multiplier = main_scene.get_terrain_speed_multiplier(global_position)
+    var actual_speed = move_speed * terrain_multiplier
     
     var toward_target = (enemy_city - global_position).normalized()
     var my_cluster_size = get_cluster_size()
@@ -230,7 +266,7 @@ func handle_combat(_delta):
     
     var viewport_size = get_viewport().get_visible_rect().size
     var margin = 50
-    var new_position = global_position + combined_force * move_speed * _delta * 0.2
+    var new_position = global_position + combined_force * actual_speed * _delta * 0.2
     new_position.x = clamp(new_position.x, margin, viewport_size.x - margin)
     new_position.y = clamp(new_position.y, margin, viewport_size.y - margin)
     
