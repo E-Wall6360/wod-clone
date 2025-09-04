@@ -38,9 +38,9 @@ const terrain_speeds = {
 }
 
 const terrain_colors = {
-    TerrainType.WATER: Color.DARK_BLUE,
-    TerrainType.SAND: Color.YELLOW,
-    TerrainType.MUD: Color(0.6, 0.4, 0.2),
+    TerrainType.WATER: Color.DODGER_BLUE,
+    TerrainType.SAND: Color.SANDY_BROWN,
+    TerrainType.MUD: Color.SADDLE_BROWN,
     TerrainType.PLAINS: Color.SEA_GREEN,
     TerrainType.BUSH: Color.DARK_GREEN,
     TerrainType.ROCKY: Color.SLATE_GRAY,
@@ -89,97 +89,29 @@ func is_near_city(chunk_x: int, chunk_y: int) -> bool:
     return distance_to_player <= 6 or distance_to_enemy <= 6
 
 func generate_terrain():
-    print("Generating spiral-based terrain...")
-    # Initialize all as plains (0)
+    # Initialize
     terrain_data = []
     for y in range(terrain_chunks.y):
         terrain_data.append([])
         for x in range(terrain_chunks.x):
             terrain_data[y].append(TerrainType.PLAINS)
     
-    # Create 64 seeds including 2 cities
-    var seeds = plant_seeds()
+    var noise = FastNoiseLite.new()
+    noise.seed = randi()
+    noise.frequency = 0.06  # Lower = larger features
     
-    for seed in seeds:
-        expand_spiral(seed.x, seed.y, seed.radius)
+    for y in range(terrain_chunks.y):
+        for x in range(terrain_chunks.x):
+            if is_near_city(x, y):
+                terrain_data[y][x] = TerrainType.PLAINS
+                continue
+            
+            var noise_value = noise.get_noise_2d(x, y)
+            # Convert -1 to +1 noise into -3 to +3 terrain height
+            var height = int(round(noise_value * 4.0))
+            terrain_data[y][x] = clamp(height, TerrainType.WATER, TerrainType.SNOW)
     
     print("Terrain generation complete")
-
-func plant_seeds() -> Array:
-    var seeds = []
-    var city_chunks = [world_pos_to_chunk(player_city_pos), world_pos_to_chunk(enemy_city_pos)]
-    
-    # City seeds
-    for city_chunk in city_chunks:
-        seeds.append({"x": city_chunk.x, "y": city_chunk.y, "radius": 8})
-    
-    # Extreme terrain seeds
-    for i in range(15):
-        var x = randi() % terrain_chunks.x
-        var y = randi() % terrain_chunks.y
-        if not is_near_city(x, y):
-            var extreme_values = [TerrainType.WATER, TerrainType.SAND, TerrainType.ROCKY, TerrainType.SNOW]
-            var value = extreme_values[randi() % extreme_values.size()]
-            
-            # Plant 5x5 seed
-            for dy in range(-2, 3):
-                for dx in range(-2, 3):
-                    var nx = x + dx
-                    var ny = y + dy
-                    if nx >= 0 and nx < terrain_chunks.x and ny >= 0 and ny < terrain_chunks.y:
-                        terrain_data[ny][nx] = value
-            
-            seeds.append({"x": x, "y": y, "radius": randi_range(8, 20)})
-    
-    return seeds
-
-func expand_spiral(start_x: int, start_y: int, max_radius: int):
-    terrain_data[start_y][start_x] = TerrainType.PLAINS  # Set seed point
-    
-    for radius in range(1, max_radius + 1):
-        var circumference = max(8, radius * 6)
-
-        for i in range(circumference):
-            var angle = (float(i) / circumference) * 2 * PI
-            var x = start_x + int(radius * cos(angle))
-            var y = start_y + int(radius * sin(angle))
-            
-            if x < 0 or x >= terrain_chunks.x or y < 0 or y >= terrain_chunks.y:
-                continue
-            
-            # Cities never change terrain
-            if is_near_city(x, y):
-                continue
-            
-            var current_value = terrain_data[y][x]
-            
-            # Calculate weighted average of 3x3 neighborhood
-            var change_prob = 0.8
-            var neighbor_sum = 0
-            var neighbor_count = 0
-            for dy in range(-1, 2):
-                for dx in range(-1, 2):
-                    var nx = x + dx
-                    var ny = y + dy
-                    if nx >= 0 and nx < terrain_chunks.x and ny >= 0 and ny < terrain_chunks.y:
-                        neighbor_sum += terrain_data[ny][nx]
-                        neighbor_count += 1
-            
-            var neighborhood_avg = float(neighbor_sum) / neighbor_count
-            
-            # New value based on neighborhood tendency
-            var new_value = current_value
-            if randf() < 0.3:
-                # Bias toward neighborhood average
-                if neighborhood_avg > current_value:
-                    new_value = clamp(current_value + 1, TerrainType.WATER, TerrainType.SNOW)
-                elif neighborhood_avg < current_value:
-                    new_value = clamp(current_value - 1, TerrainType.WATER, TerrainType.SNOW)
-                else:
-                    var variation = randi() % 3 - 1
-                    new_value = clamp(current_value + variation, TerrainType.WATER, TerrainType.SNOW)
-            
-            terrain_data[y][x] = new_value
 
 func render_terrain():
     print("Rendering terrain...")
