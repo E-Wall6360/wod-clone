@@ -4,9 +4,18 @@ enum Team { PLAYER, ENEMY }
 
 @export var team: Team = Team.PLAYER
 var target_position = Vector2.ZERO
-var move_speed = 50.0
+const NORMAL_SPEED = 25.0
+const PENALTY_SPEED = 12.5
+var move_speed = NORMAL_SPEED
+var encircled_speed = 25.0
 var cluster_mates = []
 var enemy_contacts = []
+
+# Encirclement variables
+var encircled = false
+var encirclement_timer = 0.0
+var ENCIRCLEMENT_DEATH_TIME = 3.0
+var ENCIRCLEMENT_CHECK_RADIUS = 100.0
 
 @onready var main_scene = get_parent()
 
@@ -46,6 +55,62 @@ func get_nearby_units():
                 nearby.append(child)
     return nearby
 
+func check_encirclement():
+    var home_city = get_home_city()
+    if not home_city:
+        encircled = false
+        return
+    
+    var space_state = get_world_2d().direct_space_state
+    var has_escape_route = false
+    
+    # Check path to home city
+    var query = PhysicsRayQueryParameters2D.create(global_position, home_city.global_position)
+    query.exclude = [self]
+    query.collide_with_areas = true
+    query.collide_with_bodies = false
+    var result = space_state.intersect_ray(query)
+    
+    if not result or not ("team" in result.collider) or result.collider.team == team:
+        has_escape_route = true
+    
+    # If no path to home, check paths to nearby friendlies
+    if not has_escape_route:
+        var nearby_friendlies = get_nearby_friendlies()
+        for target in nearby_friendlies:
+            query = PhysicsRayQueryParameters2D.create(global_position, target.global_position)
+            query.exclude = [self]
+            query.collide_with_areas = true
+            query.collide_with_bodies = false
+            result = space_state.intersect_ray(query)
+            
+            if not result or not ("team" in result.collider) or result.collider.team == team:
+                has_escape_route = true
+                break
+    
+    encircled = not has_escape_route
+
+func get_home_city():
+    for child in main_scene.get_children():
+        if child.has_method("_spawn_unit") and child.team == team:
+            return child
+    return null
+
+func get_nearby_friendlies():
+    var friendlies = []
+    for child in main_scene.get_children():
+        if child != self and "team" in child and child.team == team:
+            var distance = global_position.distance_to(child.global_position)
+            if distance < ENCIRCLEMENT_CHECK_RADIUS:
+                friendlies.append(child)
+    return friendlies
+
+func handle_encirclement_effects(delta):
+    encirclement_timer += delta
+    var original_color = Color.BLUE if team == Team.PLAYER else Color.RED
+    modulate = original_color.lerp(Color.WHITE, 0.35)  # Mix 35% white with original color
+    move_speed = PENALTY_SPEED
+
 func get_separation_force() -> Vector2:
     var separation = Vector2.ZERO
     var nearby = get_nearby_units()
@@ -59,6 +124,18 @@ func get_separation_force() -> Vector2:
     return separation
 
 func _process(_delta):
+    check_encirclement()
+    
+    if encircled:
+        handle_encirclement_effects(_delta)
+        if encirclement_timer >= ENCIRCLEMENT_DEATH_TIME:
+            queue_free()
+            return
+    else:
+        encirclement_timer = 0.0
+        modulate = Color.BLUE if team == Team.PLAYER else Color.RED
+        move_speed = NORMAL_SPEED
+    
     var viewport_size = get_viewport().get_visible_rect().size
     var margin = 50
     
