@@ -5,7 +5,6 @@ enum Team { PLAYER, ENEMY }
 @export var team: Team = Team.PLAYER
 var target_position = Vector2.ZERO
 const NORMAL_SPEED = 25.0
-const PENALTY_SPEED = 12.5
 var move_speed = NORMAL_SPEED
 var encircled_speed = 25.0
 var cluster_mates = []
@@ -109,7 +108,7 @@ func handle_encirclement_effects(delta):
     encirclement_timer += delta
     var original_color = Color.BLUE if team == Team.PLAYER else Color.RED
     modulate = original_color.lerp(Color.WHITE, 0.35)  # Mix 35% white with original color
-    move_speed = PENALTY_SPEED
+    move_speed = move_speed * 0.5
 
 func get_separation_force() -> Vector2:
     var separation = Vector2.ZERO
