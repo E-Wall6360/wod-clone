@@ -154,8 +154,6 @@ func get_terrain_at_position(world_pos: Vector2) -> int:
     var chunk_pos = world_pos_to_chunk(world_pos)
     return terrain_data[chunk_pos.y][chunk_pos.x]
 
-# Replace the simple get_terrain_speed_multiplier function in node_2d.gd with this:
-
 func get_terrain_speed_multiplier(world_pos: Vector2) -> float:
     # Sample the 4 corners of a 20x20 unit (since units are 20x20)
     var unit_size = 20.0

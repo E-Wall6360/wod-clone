@@ -12,7 +12,7 @@ var units_spawned: int = 0
 
 func _ready():
     # Cities are always GREY regardless of team
-    $ColorRect.color = Color.LIGHT_GRAY
+    $ColorRect.color = Color.BLACK
     
     # Create spawn timer
     spawn_timer = Timer.new()

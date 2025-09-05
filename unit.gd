@@ -3,23 +3,27 @@ extends Area2D
 enum Team { PLAYER, ENEMY }
 
 @export var team: Team = Team.PLAYER
-var target_position = Vector2.ZERO
 const NORMAL_SPEED = 25.0
+const ENCIRCLEMENT_DEATH_TIME = 3.0
+const ENCIRCLEMENT_CHECK_RADIUS = 100.0
+const RED_TEAM = Color.ORANGE_RED
+const BLUE_TEAM = Color('2163ba')
+var target_position = Vector2.ZERO
 var move_speed = NORMAL_SPEED
 var cluster_mates = []
 var enemy_contacts = []
 
 # Encirclement variables
+var original_colour
 var encircled = false
 var encirclement_timer = 0.0
-var ENCIRCLEMENT_DEATH_TIME = 3.0
-var ENCIRCLEMENT_CHECK_RADIUS = 100.0
 
 @onready var main_scene = get_parent()
 
 func _ready():
     target_position = global_position
-    modulate = Color.BLUE if team == Team.PLAYER else Color.RED
+    original_colour = BLUE_TEAM if team == Team.PLAYER else RED_TEAM
+    modulate = original_colour
     
     area_entered.connect(_on_area_entered)
     area_exited.connect(_on_area_exited)
@@ -105,8 +109,7 @@ func get_nearby_friendlies():
 
 func handle_encirclement_effects(delta):
     encirclement_timer += delta
-    var original_color = Color.BLUE if team == Team.PLAYER else Color.RED
-    modulate = original_color.lerp(Color.WHITE, 0.35)  # Mix 35% white with original color
+    modulate = original_colour.lerp(Color.WHITE, 0.25)  # Mix 25% white with original color
     move_speed = move_speed * 0.5
 
 func get_separation_force() -> Vector2:
@@ -131,7 +134,7 @@ func _process(_delta):
             return
     else:
         encirclement_timer = 0.0
-        modulate = Color.BLUE if team == Team.PLAYER else Color.RED
+        modulate = original_colour
         move_speed = NORMAL_SPEED
     
     var viewport_size = get_viewport().get_visible_rect().size
